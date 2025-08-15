@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Private 2‑Person Realtime Chat — Paale G</title>
+  <meta name="description" content="Realtime 2-person chat using Firebase Firestore (paste your config)." />
+  <style>
+    :root{ --bg:#0b0b10; --panel:#14141d; --text:#e7e7ec; --muted:#9aa0a6; --accent:#7c3aed; --border:rgba(255,255,255,.12) }
+    *{box-sizing:border-box}
+    body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif; display:grid; place-items:center; min-height:100vh }
+    .app{ width:min(880px,96vw); background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.35) }
+    header{ display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--border); background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01)) }
+    .brand{font-weight:700}
+    .grid{ display:grid; grid-template-columns: 300px 1fr }
+    .side{ border-right:1px solid var(--border); padding:14px }
+    .main{ display:flex; flex-direction:column; min-height:560px }
+    .messages{ flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:10px; background:linear-gradient(180deg,rgba(255,255,255,.01),transparent) }
+    .msg{ max-width:70%; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:#0f0f15 }
+    .me{ align-self:flex-end; background:#1a1a25; border-color:#2a2a3a }
+    .meta{ font-size:11px; color:var(--muted); margin-top:6px }
+    .composer{ display:flex; gap:8px; padding:12px; border-top:1px solid var(--border) }
+    input, textarea, select{ background:#0f0f15; border:1px solid var(--border); color:var(--text); padding:10px 12px; border-radius:10px }
+    .btn{ background:transparent; color:inherit; border:1px solid var(--border); padding:8px 10px; border-radius:10px; cursor:pointer }
+    .btn.primary{ background:linear-gradient(135deg,var(--accent),#06b6d4); border:0; color:#fff }
+    .hint{ font-size:12px; color:var(--muted) }
+    .room-list{ margin-top:10px; display:flex; gap:6px; flex-wrap:wrap }
+    .room-pill{ padding:6px 8px; border-radius:999px; border:1px solid var(--border); cursor:pointer; background:rgba(255,255,255,.02) }
+    @media (max-width:860px){ .grid{ grid-template-columns: 1fr } .side{ border-right:0; border-bottom:1px solid var(--border) } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">🔐 Paale G — 2‑Person Realtime Chat</div>
+      <div style="flex:1"></div>
+      <div class="hint">Simple Firestore demo — paste config below</div>
+    </header>
+
+    <div class="grid">
+      <aside class="side">
+        <h3 style="margin:0 0 8px 0">Sign in / Room</h3>
+        <form id="authForm">
+          <label class="hint">Email</label>
+          <input id="email" type="email" placeholder="you@example.com" required />
+          <label class="hint" style="margin-top:8px">Password</label>
+          <input id="password" type="password" placeholder="••••••" required />
+          <div style="margin-top:8px;display:flex;gap:8px">
+            <button class="btn primary" type="submit">Sign in / Create</button>
+            <button type="button" id="btnSignOut" class="btn" style="display:none">Sign out</button>
+          </div>
+        </form>
+
+        <hr style="border-color:var(--border); margin:12px 0">
+        <label class="hint">Room ID (share with friend)</label>
+        <input id="roomId" value="my-private-room" />
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="btnJoin" class="btn">Join</button>
+          <button id="btnNewRoom" class="btn">New Room</button>
+        </div>
+
+        <div class="hint" style="margin-top:12px">Your UID (copy after sign-in): <div id="uidBox"></div></div>
+        <div style="margin-top:12px">
+          <strong class="hint">Quick rooms</strong>
+          <div class="room-list" id="roomList"></div>
+        </div>
+
+        <hr style="border-color:var(--border); margin:12px 0">
+        <small class="hint">Paste your Firebase config below (from Project Settings) then refresh the page.</small>
+        <textarea id="firebaseConfig" style="width:100%;height:90px;margin-top:8px;border-radius:8px;padding:8px;">{
+  "apiKey": "PASTE_API_KEY",
+  "authDomain": "PROJECT.firebaseapp.com",
+  "projectId": "PROJECT",
+  "storageBucket": "PROJECT.appspot.com",
+  "messagingSenderId": "SENDER_ID",
+  "appId": "APP_ID"
+}</textarea>
+        <div style="margin-top:8px"><button id="btnApplyConfig" class="btn">Apply Config</button></div>
+      </aside>
+
+      <main class="main">
+        <div id="messages" class="messages"></div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 12px">
+          <div class="hint">Signed in as <strong id="meLabel">—</strong></div>
+          <div style="flex:1"></div>
+          <button id="btnExport" class="btn">Export JSON</button>
+        </div>
+
+        <form id="composer" class="composer" style="display:none">
+          <input id="text" placeholder="Type a message…" autocomplete="off" />
+          <button class="btn primary">Send</button>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <!-- Firebase (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <script>
+    // --- Lightweight helper to parse user-pasted config ---
+    function parseConfig(text){ try{ return JSON.parse(text); }catch(e){ alert('Invalid JSON config'); return null } }
+
+    let firebaseApp = null;
+    let auth = null;
+    let db = null;
+
+    function initFirebaseFromTextarea(){
+      const txt = document.getElementById('firebaseConfig').value.trim();
+      const cfg = parseConfig(txt); if(!cfg) return false;
+      try{
+        if(firebaseApp) { console.log('Re-init: deleting old app'); }
+        firebaseApp = firebase.initializeApp(cfg);
+        auth = firebase.auth(); db = firebase.firestore();
+        window._pg_firebase = { app: firebaseApp, auth, db };
+        alert('Firebase initialized — now Sign in and Join a room');
+        setupAuthListener();
+        return true;
+      }catch(e){ alert('Init error: '+e.message); return false }
+    }
+
+    document.getElementById('btnApplyConfig').onclick = ()=> initFirebaseFromTextarea();
+
+    // Auth UI
+    const $ = s => document.querySelector(s);
+    $('#authForm').addEventListener('submit', async e=>{
+      e.preventDefault();
+      if(!initFirebaseFromTextarea()) return;
+      const email = $('#email').value.trim();
+      const password = $('#password').value.trim();
+      try{
+        await auth.signInWithEmailAndPassword(email, password);
+      }catch(err){
+        if(err.code === 'auth/user-not-found'){
+          await auth.createUserWithEmailAndPassword(email, password);
+        }else{ alert(err.message) }
+      }
+    });
+    $('#btnSignOut').onclick = ()=> auth.signOut();
+
+    // When user state changes
+    function setupAuthListener(){
+      if(!auth) return;
+      auth.onAuthStateChanged(user=>{
+        if(user){
+          $('#meLabel').textContent = user.email || user.uid;
+          $('#btnSignOut').style.display = '';
+          $('#composer').style.display = '';
+          $('#uidBox').innerHTML = `<code>${user.uid}</code>`;
+          loadRecentRooms();
+        }else{
+          $('#meLabel').textContent = '—';
+          $('#btnSignOut').style.display = 'none';
+          $('#composer').style.display = 'none';
+          $('#uidBox').textContent = '';
+          detachRoom();
+        }
+      });
+    }
+
+    // Rooms + messages
+    let currentRoom = null;
+    let unsub = null;
+
+    $('#btnNewRoom').onclick = ()=>{ const code = 'room-'+Math.random().toString(36).slice(2,9); $('#roomId').value = code; alert('New invite: '+code); };
+    $('#btnJoin').onclick = ()=> joinRoom($('#roomId').value.trim() || 'my-private-room');
+
+    async function joinRoom(roomId){
+      if(!auth || !db) { alert('Initialize Firebase and sign in first'); return }
+      if(!auth.currentUser){ alert('Sign in first'); return }
+      if(unsub) unsub();
+      currentRoom = roomId;
+      addRecentRoom(roomId);
+      const roomRef = db.collection('rooms').doc(roomId);
+      await roomRef.set({ updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true });
+
+      const msgsRef = roomRef.collection('messages').orderBy('createdAt');
+      unsub = msgsRef.onSnapshot(snapshot=>{
+        const container = document.getElementById('messages'); container.innerHTML = '';
+        snapshot.forEach(doc=>{
+          const m = doc.data(); renderMessage(doc.id, m);
+        });
+        container.scrollTop = container.scrollHeight;
+      });
+
+      status('Joined '+roomId);
+    }
+
+    function detachRoom(){ if(unsub) unsub(); document.getElementById('messages').innerHTML=''; currentRoom=null; }
+
+    // send message
+    $('#composer').addEventListener('submit', async e=>{
+      e.preventDefault();
+      if(!currentRoom){ alert('Join a room first'); return }
+      const text = $('#text').value.trim(); if(!text) return;
+      const roomRef = db.collection('rooms').doc(currentRoom);
+      await roomRef.collection('messages').add({
+        text,
+        uid: auth.currentUser.uid,
+        email: auth.currentUser.email || null,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      $('#text').value = '';
+    });
+
+    // render message helper
+    function renderMessage(id, m){
+      const container = document.getElementById('messages');
+      const div = document.createElement('div');
+      const isMe = auth && auth.currentUser && m.uid === auth.currentUser.uid;
+      div.className = 'msg' + (isMe ? ' me' : '');
+      const time = m.createdAt && m.createdAt.toDate ? m.createdAt.toDate().toLocaleTimeString() : '';
+      div.innerHTML = `<div>${escapeHtml(m.text)}</div><div class="meta">${m.email||m.uid} • ${time}</div>`;
+      container.appendChild(div);
+    }
+
+    function escapeHtml(s){ return (s||'').replace(/[&<>\"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":"&#39;" })[c]); }
+
+    // export messages
+    $('#btnExport').onclick = async ()=>{
+      if(!currentRoom) return alert('Join a room first');
+      const snaps = await db.collection('rooms').doc(currentRoom).collection('messages').orderBy('createdAt').get();
+      const data = snaps.docs.map(d=> ({ id:d.id, ...d.data() }));
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download = `${currentRoom}-export.json`; a.click(); URL.revokeObjectURL(url);
+    };
+
+    // Recent rooms in localStorage
+    function addRecentRoom(r){ const arr = JSON.parse(localStorage.getItem('pg_rooms')||'[]'); if(!arr.includes(r)) arr.unshift(r); localStorage.setItem('pg_rooms', JSON.stringify(arr.slice(0,8))); loadRecentRooms(); }
+    function loadRecentRooms(){ const arr = JSON.parse(localStorage.getItem('pg_rooms')||'[]'); const el = document.getElementById('roomList'); el.innerHTML=''; arr.forEach(r=>{ const b=document.createElement('button'); b.className='room-pill'; b.textContent=r; b.onclick=()=> joinRoom(r); el.appendChild(b); }); }
+
+    function status(s){ console.log(s); }
+
+    // attach listener once firebase is initialized
+    // We poll for firebase to be set (user pastes config and init happens)
+    const initWatcher = setInterval(()=>{
+      if(window.firebase && window.firebase.apps && window.firebase.apps.length>0 && !firebaseApp){
+        try{ initFirebaseFromTextarea(); setupAuthListener(); }
+        catch(e){};
+      }
+    }, 800);
+
+    // Firestore security rules snippet (paste in console rules editor and replace UIDs & optionally roomId)
+    console.log(`Firestore rules snippet:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{roomId} {
+      allow read, write: if request.auth != null && (request.auth.uid == 'UID_USER_1' || request.auth.uid == 'UID_USER_2');
+      match /messages/{msgId} {
+        allow read, create: if request.auth != null && (request.auth.uid == 'UID_USER_1' || request.auth.uid == 'UID_USER_2');
+        allow update, delete: if false;
+      }
+    }
+  }
+}
+`);
+
+  </script>
+</body>
+</html>
